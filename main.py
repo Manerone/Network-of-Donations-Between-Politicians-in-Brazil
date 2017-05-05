@@ -3,6 +3,7 @@
 import os
 from pyspark import SparkContext, SQLContext
 from pyspark.sql import Row
+from graphframes import *
 
 CURRENT_PATH = os.path.dirname(os.path.realpath(__file__))
 CANDIDATES_PATH = CURRENT_PATH + '/databases/consulta_cand/consulta_cand_2016_PR.txt'
@@ -18,7 +19,7 @@ def read_candidates_file(context, file_path):
     '''
     candidates_file = context.textFile(file_path)
     candidates_splitted_in_parts = candidates_file.map(
-        lambda line: line.replace('"', '').split(';')
+        lambda line: line.encode('unicode-escape').replace('"', '').split(';')
     )
     return candidates_splitted_in_parts.map(
         lambda candidate: Row(
@@ -39,7 +40,8 @@ def read_donations_file(context, file_path):
     '''
     donations_file = context.textFile(file_path)
     donations_splitted_in_parts = donations_file.map(
-        lambda line: line.replace('"', '').replace(',', '.').split(';')
+        lambda line: line.encode('unicode-escape').replace('"',
+                                                  '').replace(',', '.').split(';')
     )
     return donations_splitted_in_parts.map(
         lambda donation: Row(
@@ -58,8 +60,10 @@ def main():
 
     candidates = read_candidates_file(spark_context, CANDIDATES_PATH)
     donations = read_donations_file(spark_context, DONATIONS_PATH)
+    graph = GraphFrame(candidates, donations)
     print donations.take(10)
+    graph.vertices.show()
 
 
 if __name__ == '__main__':
-   main()
+    main()
