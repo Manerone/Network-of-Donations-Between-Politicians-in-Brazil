@@ -34,7 +34,7 @@ def read_candidates_file(context, file_path):
             status=candidate[44], partido=int(candidate[17]),
             nasc=candidate[26], genero=candidate[30]
         )
-    ).toDF().where("cidade = 'CURITIBA'")
+    ).toDF()
 
 def read_donations_file(context, file_path):
     '''Read file with donations to candidates
@@ -67,6 +67,8 @@ def concat(type):
 
 
 def clustering_coef(n_of_neighbors, n_of_edges_in_neighborhood):
+    if n_of_neighbors < 2:
+        return 0
     return n_of_edges_in_neighborhood/float(n_of_neighbors * (n_of_neighbors - 1))
 
 
