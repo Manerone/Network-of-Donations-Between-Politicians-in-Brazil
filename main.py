@@ -60,66 +60,59 @@ def read_donations_file(context, file_path):
     ).toDF()
 
 
-# def out_neighbors(vertice, graph):
-#     print 'Finding out neighbors'
-#     edges = graph.edges
-#     v_id = str(vertice.id)
-#     query = 'src == ' + v_id + ' AND dst != ' + v_id
-    
-#     return edges.where(query).select(edges.dst.alias('id')).distinct()
+def concat(type):
+    def concat_(*args):
+        return list(set(chain(*args)))
+    return func.udf(concat_, ArrayType(type))
 
 
-# def in_neighbors(vertice, graph):
-#     print 'Finding in neighbors'
-#     edges = graph.edges
-#     v_id = str(vertice.id)
-#     query = 'dst == ' + v_id + ' AND src != ' + v_id
-
-#     return edges.where(query).select(edges.src.alias('id')).distinct()
-
-
-# def neighbors(vertice, graph):
-#     print vertice
-#     o_neighbors = out_neighbors(vertice, graph)
-#     i_neighbors = in_neighbors(vertice, graph)
-#     print 'Joining them'
-#     return o_neighbors.union(i_neighbors).distinct()
-
-
-# def vertice_clustering_coefficient(vertice, graph):
-#     vertice_neighbors = neighbors(vertice, graph)
-#     n_of_neighbors = vertice_neighbors.count()
-
-#     # vertice_neighbors_id = vertice_neighbors.rdd.map(lambda x: x['id']).collect()
-
-#     print vertice_neighbors.show()
-
-#     if n_of_neighbors < 2:
-#         return 0
-
-#     edges = graph.edges
-
-#     query = (edges.src.isin(vertice_neighbors.id))\
-#             & (edges.dst.isin(vertice_neighbors.id))\
-#             & (edges.src != edges.dst)
-
-#     vertices = edges.join(
-#         vertice_neighbors, query
-#     ).select('dst', 'src').distinct()
-
-#     vertices.show()
-
-#     return vertices.count() / float(n_of_neighbors * (n_of_neighbors - 1))
+def clustering_coef(n_of_neighbors, n_of_edges_in_neighborhood):
+    return n_of_edges_in_neighborhood/float(n_of_neighbors * (n_of_neighbors - 1))
 
 
 def clustering_coefficient(graph):
-    pass
+    vertices = graph.vertices
+    edges = graph.edges.where('src != dst')
 
+    out_neighbors = vertices.join(edges, vertices.id == edges.src)
+    in_neighbors = vertices.join(edges, vertices.id == edges.dst)
 
-def concat(type):
-    def concat_(*args):
-        return list(chain(*args))
-    return func.udf(concat_, ArrayType(type))
+    print 'Finding out neighbors'
+    out_neighbors_ids = out_neighbors.select('id', 'dst').distinct().groupBy(
+        'id').agg(func.expr('collect_list(dst) AS out_neighbors'))
+
+    print 'Finding in neighbors'
+    in_neighbors_ids = in_neighbors.select('id', 'src').distinct().groupBy(
+        'id').agg(func.expr('collect_list(src) AS in_neighbors'))
+
+    concat_string_arrays = concat(StringType())
+
+    print 'Joining them'
+    neighbors_ids = out_neighbors_ids.join(
+        in_neighbors_ids, out_neighbors_ids.id == in_neighbors_ids.id
+    ).select(
+        in_neighbors_ids.id,
+        concat_string_arrays('in_neighbors', 'out_neighbors').alias('neighbors')
+    )
+
+    print 'Counting edges between neighbors'
+    query = func.expr("array_contains(neighbors, src)") &\
+        func.expr("array_contains(neighbors, dst)")
+
+    edges_in_neighborhood = neighbors_ids.join(edges, query, "left_outer").select(
+        neighbors_ids.id, edges.dst, edges.src
+        ).groupBy(neighbors_ids.id).agg(
+            func.countDistinct(edges.dst, edges.src).alias('n_of_edges_in_neighborhood')
+        )
+
+    print 'Counting neighbors'
+    n_of_neighbors = neighbors_ids.select('id', func.size('neighbors').alias('n_of_neighbors'))
+
+    print 'Calculating clustering coefficient'
+    return edges_in_neighborhood.join(n_of_neighbors, edges_in_neighborhood.id == n_of_neighbors.id)\
+    .rdd.map(
+        lambda row: clustering_coef(row['n_of_neighbors'], row['n_of_edges_in_neighborhood'])
+    ).mean()
 
 
 def main():
@@ -135,49 +128,10 @@ def main():
     print 'Build graph'
     graph = GraphFrame(candidates, donations)
 
-    # print clustering_coefficient(graph)
+    cc = clustering_coefficient(graph)
 
+    print cc
 
-    vertices = graph.vertices
-    edges = graph.edges.where('src != dst')
-
-    out_neighbors = vertices.join(edges, vertices.id == edges.src)
-    in_neighbors = vertices.join(edges, vertices.id == edges.dst)
-
-    # number_of_out_neighbors = out_neighbors.groupBy('id').agg(
-    #     func.countDistinct('dst').alias('n_of_neighbors')
-    # )
-
-    # number_of_in_neighbors = in_neighbors.groupBy('id').agg(
-    #     func.countDistinct('src').alias('n_of_neighbors')
-    # )
-
-    print 'Finding out neighbors'
-    out_neighbors_ids = out_neighbors.select('id', 'dst').distinct().groupBy('id').agg(func.expr('collect_list(dst) AS out_neighbors'))
-
-    print 'Finding in neighbors'
-    in_neighbors_ids = in_neighbors.select('id','src').distinct().groupBy('id').agg(func.expr('collect_list(src) AS in_neighbors'))
-
-    concat_string_arrays = concat(StringType())
-
-
-    print 'Joining them'
-    neighbors_ids = out_neighbors_ids.join(in_neighbors_ids, out_neighbors_ids.id == in_neighbors_ids.id).select(
-        in_neighbors_ids.id, concat_string_arrays('in_neighbors', 'out_neighbors').alias('neighbors')
-    )
-
-    print neighbors_ids.select('neighbors').take(10)
-
-    # number_of_neighbors.join(neighbors_ids, neighbors_ids.id == number_of_neighbors.id)\
-    # .select(neighbors_ids.id, neighbors_ids.neighbors, number_of_neighbors.n_of_neighbors).show()
-
-    # query = func.expr("array_contains(neighbors, src)") &\
-    #     func.expr("array_contains(neighbors, dst)")
-
-    # neighbors_ids.join(edges, query).select(neighbors_ids.id, edges.dst, edges.src).show()
-        # .groupBy(neighbors_ids.id).agg(
-        #     func.countDistinct(edges.dst, edges.src)
-        # ).show()
 
 if __name__ == '__main__':
     main()
