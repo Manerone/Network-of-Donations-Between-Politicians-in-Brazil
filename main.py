@@ -87,9 +87,8 @@ def clustering_coefficient(graph):
     in_neighbors_ids = in_neighbors.select('id', 'src').distinct().groupBy(
         'id').agg(func.expr('collect_list(src) AS in_neighbors'))
 
-    concat_string_arrays = concat(StringType())
-
     print 'Joining them'
+    concat_string_arrays = concat(StringType())
     neighbors_ids = out_neighbors_ids.join(
         in_neighbors_ids, out_neighbors_ids.id == in_neighbors_ids.id
     ).select(
@@ -117,6 +116,15 @@ def clustering_coefficient(graph):
     ).mean()
 
 
+def average_shortest_path(graph):
+    s_size = 1000 / float(graph.vertices.count())
+    lm = graph.vertices.sample(False, s_size).rdd.map(
+        lambda r: r['id']).collect()
+    results = graph.shortestPaths(landmarks=lm)
+    return results.select('id', func.explode('distances').alias('key', 'value'))\
+                  .groupBy().agg(func.avg('value').alias('average')).collect()[0]['average']
+
+
 def main():
     spark_context = SparkContext()
     sql_context = SQLContext(spark_context)
@@ -133,6 +141,10 @@ def main():
     cc = clustering_coefficient(graph)
 
     print cc
+
+    sp = average_shortest_path(graph)
+
+    print sp
 
 
 if __name__ == '__main__':
