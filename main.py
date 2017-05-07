@@ -3,7 +3,9 @@
 import os
 from pyspark import SparkContext, SQLContext
 from pyspark.sql import Row
+import pyspark.sql.functions as func
 from graphframes import *
+import graphviz as gv
 
 CURRENT_PATH = os.path.dirname(os.path.realpath(__file__))
 CANDIDATES_PATH = CURRENT_PATH + '/databases/consulta_cand/consulta_cand_2016_PR.txt'
@@ -30,7 +32,7 @@ def read_candidates_file(context, file_path):
             status=candidate[44], partido=int(candidate[17]),
             nasc=candidate[26], genero=candidate[30]
         )
-    ).toDF()
+    ).toDF().where("cidade = 'CURITIBA'")
 
 def read_donations_file(context, file_path):
     '''Read file with donations to candidates
@@ -40,29 +42,90 @@ def read_donations_file(context, file_path):
     '''
     donations_file = context.textFile(file_path)
     donations_splitted_in_parts = donations_file.map(
-        lambda line: line.encode('unicode-escape').replace('"',
-                                                  '').replace(',', '.').split(';')
+        lambda line: line.encode('unicode-escape').replace('"', '').replace(',', '.').split(';')
     )
     return donations_splitted_in_parts.map(
         lambda donation: Row(
-            dst=donation[12],
-            src=donation[16],
+            dst=donation[12], # CPF
+            src=donation[16], # CPF
             nome_doador=donation[17],
             cod_cidade=int(donation[6]),
             valor=float(donation[25]),
-            descricao=donation[29]
+            descricao=donation[29],
+            data=donation[2],
+            num_recibo=donation[14]
         )
     ).toDF()
+
+
+def out_neighbors(vertice, graph):
+    print 'Finding out neighbors'
+    edges = graph.edges
+    v_id = str(vertice.id)
+    query = 'src == ' + v_id + ' AND dst != ' + v_id
+    
+    return edges.where(query).select(edges.dst.alias('id')).distinct()
+
+
+def in_neighbors(vertice, graph):
+    print 'Finding in neighbors'
+    edges = graph.edges
+    v_id = str(vertice.id)
+    query = 'dst == ' + v_id + ' AND src != ' + v_id
+
+    return edges.where(query).select(edges.src.alias('id')).distinct()
+
+
+def neighbors(vertice, graph):
+    print vertice
+    o_neighbors = out_neighbors(vertice, graph)
+    i_neighbors = in_neighbors(vertice, graph)
+    print 'Joining them'
+    return o_neighbors.union(i_neighbors).distinct()
+
+
+def vertice_clustering_coefficient(vertice, graph):
+    vertice_neighbors = neighbors(vertice, graph)
+    n_of_neighbors = vertice_neighbors.count()
+
+    # vertice_neighbors_id = vertice_neighbors.rdd.map(lambda x: x['id']).collect()
+
+    print vertice_neighbors.show()
+
+    if n_of_neighbors < 2:
+        return 0
+
+    edges = graph.edges
+
+    vertices = edges.where(edges.src.isin(vertice_neighbors.id))\
+                    .where(edges.dst.isin(vertice_neighbors.id))\
+                    .where('dst != src')\
+                    .select('dst', 'src').distinct()
+
+    return vertices.count() / float(n_of_neighbors * (n_of_neighbors - 1))
+
+
+def clustering_coefficient(graph):
+    vertices = graph.vertices.collect()
+    ccs = [vertice_clustering_coefficient(v, graph) for v in vertices]
+
+    return sum(ccs)/float(len(ccs))
+
 
 def main():
     spark_context = SparkContext()
     sql_context = SQLContext(spark_context)
 
+    print 'Reading candidates file'
     candidates = read_candidates_file(spark_context, CANDIDATES_PATH)
+
+    print 'Reading donations file'
     donations = read_donations_file(spark_context, DONATIONS_PATH)
+
+    print 'Build graph'
     graph = GraphFrame(candidates, donations)
-    print donations.take(10)
-    graph.vertices.show()
+
+    print clustering_coefficient(graph)
 
 
 if __name__ == '__main__':
