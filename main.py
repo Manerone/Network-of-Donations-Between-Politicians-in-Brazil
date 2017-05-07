@@ -97,10 +97,15 @@ def vertice_clustering_coefficient(vertice, graph):
 
     edges = graph.edges
 
-    vertices = edges.where(edges.src.isin(vertice_neighbors.id))\
-                    .where(edges.dst.isin(vertice_neighbors.id))\
-                    .where('dst != src')\
-                    .select('dst', 'src').distinct()
+    query = (edges.src.isin(vertice_neighbors.id))\
+            & (edges.dst.isin(vertice_neighbors.id))\
+            & (edges.src != edges.dst)
+
+    vertices = edges.join(
+        vertice_neighbors, query
+    ).select('dst', 'src').distinct()
+
+    vertices.show()
 
     return vertices.count() / float(n_of_neighbors * (n_of_neighbors - 1))
 
@@ -125,7 +130,29 @@ def main():
     print 'Build graph'
     graph = GraphFrame(candidates, donations)
 
-    print clustering_coefficient(graph)
+    # print clustering_coefficient(graph)
+
+
+    vertices = graph.vertices
+    edges = graph.edges.where('src != dst')
+
+    j = vertices.join(edges, vertices.id == edges.src)
+    number_of_neighbors = j.groupBy('id').agg(
+        func.countDistinct('dst').alias('n_of_neighbors')
+    )
+
+    neighbors_ids = j.select('id', 'dst').distinct().groupBy('id').agg(func.expr('collect_list(dst) AS neighbors'))
+
+    number_of_neighbors.join(neighbors_ids, neighbors_ids.id == number_of_neighbors.id)\
+    .select(neighbors_ids.id, neighbors_ids.neighbors, number_of_neighbors.n_of_neighbors).show()
+
+    # query = (edges.src.isin(n.neighbors)) &\
+    #         (edges.dst.isin(n.neighbors))
+
+    # n.join(edges, query).select(n.id, edges.dst, edges.src)\
+    #          .groupBy(n.id).agg(
+    #              func.countDistinct(edges.dst, edges.src)
+    #          ).show()
 
 
 if __name__ == '__main__':
