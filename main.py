@@ -34,7 +34,7 @@ def read_candidates_file(context, file_path):
             status=candidate[44], partido=int(candidate[17]),
             nasc=candidate[26], genero=candidate[30]
         )
-    ).toDF()
+    ).toDF().where("cidade = 'CURITIBA'")
 
 def read_donations_file(context, file_path):
     '''Read file with donations to candidates
@@ -117,6 +117,7 @@ def clustering_coefficient(graph):
 
 
 def average_shortest_path(graph):
+    print 'Calculating average shortest path'
     s_size = 1000 / float(graph.vertices.count())
     lm = graph.vertices.sample(False, s_size).rdd.map(
         lambda r: r['id']).collect()
