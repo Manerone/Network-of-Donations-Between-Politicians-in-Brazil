@@ -6,6 +6,8 @@ from pyspark.sql import Row
 import pyspark.sql.functions as func
 from graphframes import *
 from local_clustering_coefficient import LocalClusteringCoefficient
+from pyspark.sql.types import StringType, ArrayType
+from itertools import chain
 
 CURRENT_PATH = os.path.dirname(os.path.realpath(__file__))
 CANDIDATES_PATH = CURRENT_PATH + '/databases/consulta_cand/consulta_cand_2016_PR.txt'
@@ -71,6 +73,80 @@ def average_shortest_path(graph):
                   .groupBy().agg(func.avg('value').alias('average')).collect()[0]['average']
 
 
+def concat(defined_type):
+    '''UDF func to concat arrays
+    '''
+    def concat_(*args):
+        '''Concat arrays and eliminates duplicates
+        '''
+        return list(set(chain(*args)))
+    return func.udf(concat_, ArrayType(defined_type))
+
+
+def assortativity(graph):
+    '''Calculates the graph assortativity.
+    '''
+    print 'Calculating graph assortativity'
+
+    print ' - Calculating every node degree'
+    edges = graph.edges.where('src != dst')
+
+    out_neighbors_ids = edges.select(edges.src.alias('id'), 'dst').distinct().groupBy(
+        'id').agg(func.expr('collect_list(dst) AS out_neighbors'))
+
+    in_neighbors_ids = edges.select(edges.dst.alias('id'), 'src').distinct().groupBy(
+        'id').agg(func.expr('collect_list(src) AS in_neighbors'))
+
+    concat_string_arrays = concat(StringType())
+    nodes_degree = out_neighbors_ids.join(
+        in_neighbors_ids, out_neighbors_ids.id == in_neighbors_ids.id
+    ).select(
+        in_neighbors_ids.id,
+        concat_string_arrays(
+            'in_neighbors', 'out_neighbors').alias('neighbors')
+    ).select(
+        'id',
+        func.size('neighbors').alias('degree')
+    )
+
+    print ' - Calculating edges degrees'
+
+    edges = edges.select('src', 'dst').distinct()
+
+    edges_degress = edges.join(
+        nodes_degree, edges.src == nodes_degree.id
+    ).select(
+        'src', 'dst', nodes_degree.degree.alias('src_degree')
+    ).join(
+        nodes_degree, edges.dst == nodes_degree.id
+    ).select(
+        'src', 'dst', 'src_degree', nodes_degree.degree.alias('dst_degree')
+    ).rdd
+
+    print ' - Calculating the assortativity'
+
+    sum1 = edges_degress.map(
+        lambda row: row['src_degree'] * row['dst_degree']
+    ).sum()
+
+    sum2 = edges_degress.map(
+        lambda row: (row['src_degree'] + row['dst_degree'])
+    ).sum()
+    sum2 = sum2 / 2.0
+    sum2 = sum2 * sum2
+
+    sum3 = edges_degress.map(
+        lambda row: (row['src_degree'] ** 2) + (row['dst_degree'] ** 2)
+    ).sum()
+    sum3 = sum3 / 2.0
+
+    print sum1
+    print sum2
+    print sum3
+
+    return (sum1 - sum2)/(sum3 - sum2)
+
+
 def main():
     '''Main function of the script
     '''
@@ -86,9 +162,11 @@ def main():
     print 'Build graph'
     graph = GraphFrame(candidates, donations)
 
-    print LocalClusteringCoefficient(graph).calculate_average()
+    print assortativity(graph)
 
-    print average_shortest_path(graph)
+    # print LocalClusteringCoefficient(graph).calculate_average()
+
+    # print average_shortest_path(graph)
 
 
 if __name__ == '__main__':
