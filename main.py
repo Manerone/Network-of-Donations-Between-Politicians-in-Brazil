@@ -73,18 +73,14 @@ def clustering_coef(n_of_neighbors, n_of_edges_in_neighborhood):
 
 
 def clustering_coefficient(graph):
-    vertices = graph.vertices
     edges = graph.edges.where('src != dst')
 
-    out_neighbors = vertices.join(edges, vertices.id == edges.src)
-    in_neighbors = vertices.join(edges, vertices.id == edges.dst)
-
     print 'Finding out neighbors'
-    out_neighbors_ids = out_neighbors.select('id', 'dst').distinct().groupBy(
+    out_neighbors_ids = edges.select(edges.src.alias('id'), 'dst').distinct().groupBy(
         'id').agg(func.expr('collect_list(dst) AS out_neighbors'))
 
     print 'Finding in neighbors'
-    in_neighbors_ids = in_neighbors.select('id', 'src').distinct().groupBy(
+    in_neighbors_ids = edges.select(edges.dst.alias('id'), 'src').distinct().groupBy(
         'id').agg(func.expr('collect_list(src) AS in_neighbors'))
 
     print 'Joining them'
