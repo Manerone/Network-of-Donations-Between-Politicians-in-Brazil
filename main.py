@@ -1,13 +1,11 @@
 '''This script creates a social network using candidates as vertices and donations as edges
 '''
 import os
-from itertools import chain
 from pyspark import SparkContext, SQLContext
 from pyspark.sql import Row
 import pyspark.sql.functions as func
 from graphframes import *
 from local_clustering_coefficient import LocalClusteringCoefficient
-import graphviz as gv
 
 CURRENT_PATH = os.path.dirname(os.path.realpath(__file__))
 CANDIDATES_PATH = CURRENT_PATH + '/databases/consulta_cand/consulta_cand_2016_PR.txt'
@@ -61,16 +59,21 @@ def read_donations_file(context, file_path):
 
 
 def average_shortest_path(graph):
+    '''Calculates the average shortest path of the graph.
+    OBS: Only uses 1000 vertices.
+    '''
     print 'Calculating average shortest path'
     s_size = 1000 / float(graph.vertices.count())
-    lm = graph.vertices.sample(False, s_size).rdd.map(
+    vertices_sample = graph.vertices.sample(False, s_size).rdd.map(
         lambda r: r['id']).collect()
-    results = graph.shortestPaths(landmarks=lm)
+    results = graph.shortestPaths(landmarks=vertices_sample)
     return results.select('id', func.explode('distances').alias('key', 'value'))\
                   .groupBy().agg(func.avg('value').alias('average')).collect()[0]['average']
 
 
 def main():
+    '''Main function of the script
+    '''
     spark_context = SparkContext()
     sql_context = SQLContext(spark_context)
 
@@ -83,13 +86,9 @@ def main():
     print 'Build graph'
     graph = GraphFrame(candidates, donations)
 
-    cc = LocalClusteringCoefficient(graph).calculate_average()
+    print LocalClusteringCoefficient(graph).calculate_average()
 
-    print cc
-
-    sp = average_shortest_path(graph)
-
-    print sp
+    print average_shortest_path(graph)
 
 
 if __name__ == '__main__':
