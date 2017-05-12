@@ -147,6 +147,14 @@ def assortativity(graph):
     return (sum1 - sum2)/(sum3 - sum2)
 
 
+def transform_to_undirected(graph):
+    edges = graph.edges.where('src != dst')
+    only_one_edges = edges.groupBy('src', 'dst').agg(
+        func.first('num_recibo').alias('num_recibo')
+    )
+
+
+
 def main():
     '''Main function of the script
     '''
@@ -161,8 +169,9 @@ def main():
 
     print 'Build graph'
     graph = GraphFrame(candidates, donations)
+    graph = transform_to_undirected(graph)
 
-    print assortativity(graph)
+    # print assortativity(graph)
 
     # print LocalClusteringCoefficient(graph).calculate_average()
 
