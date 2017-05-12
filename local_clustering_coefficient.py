@@ -46,7 +46,6 @@ class LocalClusteringCoefficient(object):
 
     def all_vertices(self):
         '''Calculates the Local Clustering Coefficient for every vertice in the graph.
-        ATENTION: the algorithm considers the graph as undirected.
         Return: a DataFrame with two columns:
         - "id": the ID of the vertex.
         - "clustering_coefficient": the clustering coefficient of that vertice.
