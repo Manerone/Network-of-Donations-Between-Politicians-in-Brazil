@@ -73,13 +73,25 @@ def average_shortest_path(graph):
                   .groupBy().agg(func.avg('value').alias('average')).collect()[0]['average']
 
 
+def my_chain(*args):
+    '''Transform None to [] before chaining them
+    '''
+    n_args = []
+    for arg in args:
+        if arg is None:
+            n_args.append([])
+        else:
+            n_args.append(arg)
+    return chain(*tuple(n_args))
+
+
 def concat(defined_type):
     '''UDF func to concat arrays
     '''
     def concat_(*args):
         '''Concat arrays and eliminates duplicates
         '''
-        return list(set(chain(*args)))
+        return sorted(list(set(my_chain(*args))))
     return func.udf(concat_, ArrayType(defined_type))
 
 
@@ -148,10 +160,25 @@ def assortativity(graph):
 
 
 def transform_to_undirected(graph):
-    edges = graph.edges.where('src != dst')
-    only_one_edges = edges.groupBy('src', 'dst').agg(
-        func.first('num_recibo').alias('num_recibo')
+    original_edges = graph.edges.where('src != dst')
+    concat_string_arrays = concat(StringType())
+    edges = original_edges.groupBy('num_recibo').agg(
+        func.expr('collect_list(dst) AS dsts'),
+        func.expr('collect_list(src) AS srcs')
+    ).select(
+        'num_recibo',
+        concat_string_arrays('dsts', 'srcs').alias('vertices')
     )
+
+    edges = edges.groupBy('vertices').agg(
+        func.first(edges.num_recibo).alias('num_recibo')
+    ).select('num_recibo')
+
+    edges = edges.join(
+        original_edges, edges.num_recibo == original_edges.num_recibo
+    ).drop(edges.num_recibo)
+
+    return GraphFrame(graph.vertices, edges)
 
 
 
