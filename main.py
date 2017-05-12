@@ -101,7 +101,7 @@ def assortativity(graph):
     print 'Calculating graph assortativity'
 
     print ' - Calculating every node degree'
-    edges = graph.edges.where('src != dst')
+    edges = graph.edges
 
     out_neighbors_ids = edges.select(edges.src.alias('id'), 'dst').distinct().groupBy(
         'id').agg(func.expr('collect_list(dst) AS out_neighbors'))
@@ -116,10 +116,20 @@ def assortativity(graph):
         in_neighbors_ids.id,
         concat_string_arrays(
             'in_neighbors', 'out_neighbors').alias('neighbors')
-    ).select(
+    )
+
+    nodes_degree = nodes_degree.select(
         'id',
         func.size('neighbors').alias('degree')
     )
+
+
+    nodes_degree = graph.vertices.join(
+        nodes_degree, nodes_degree.id == graph.vertices.id, 'left_outer'
+    ).select(
+        graph.vertices.id,
+        nodes_degree.degree
+    ).fillna({'degree': 0})
 
     print ' - Calculating edges degrees'
 
@@ -137,24 +147,26 @@ def assortativity(graph):
 
     print ' - Calculating the assortativity'
 
+    m = 1 / float(edges_degress.count())
+
     sum1 = edges_degress.map(
         lambda row: row['src_degree'] * row['dst_degree']
     ).sum()
 
+    sum1 = m * sum1
+
     sum2 = edges_degress.map(
-        lambda row: (row['src_degree'] + row['dst_degree'])
+        lambda row: (row['src_degree'] + row['dst_degree']) / 2.0
     ).sum()
-    sum2 = sum2 / 2.0
+
+    sum2 = m * sum2
     sum2 = sum2 * sum2
 
     sum3 = edges_degress.map(
-        lambda row: (row['src_degree'] ** 2) + (row['dst_degree'] ** 2)
+        lambda row: (row['src_degree'] ** 2) + (row['dst_degree'] ** 2) / 2.0
     ).sum()
-    sum3 = sum3 / 2.0
 
-    print sum1
-    print sum2
-    print sum3
+    sum3 = m * sum3
 
     return (sum1 - sum2)/(sum3 - sum2)
 
@@ -198,7 +210,7 @@ def main():
     graph = GraphFrame(candidates, donations)
     graph = transform_to_undirected(graph)
 
-    # print assortativity(graph)
+    print assortativity(graph)
 
     # print LocalClusteringCoefficient(graph).calculate_average()
 
