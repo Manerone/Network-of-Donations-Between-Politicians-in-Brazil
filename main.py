@@ -89,9 +89,9 @@ def main():
 
     print Assortativity(graph).calculate()
 
-    # print LocalClusteringCoefficient(graph).calculate_average()
+    print LocalClusteringCoefficient(graph).calculate_average()
 
-    # print average_shortest_path(graph)
+    print average_shortest_path(graph)
 
 
 if __name__ == '__main__':
