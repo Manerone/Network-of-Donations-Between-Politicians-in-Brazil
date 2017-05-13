@@ -2,55 +2,16 @@
 Article: Newman, M. E. J. (2003). Mixing patterns in networks.\
 Phys. Rev. E, 67, 026126. doi: 10.1103/PhysRevE.67.026126
 '''
-from itertools import chain
-from math import sqrt
-from pyspark.sql.types import StringType, ArrayType
 import pyspark.sql.functions as func
 from graphframes import *
 
 
-def my_chain(*args):
-    '''Transform None to [] before chaining them
+def e_d(value):
+    '''Excess degree: Return the given value - 1 or 0 if value equals 0.
     '''
-    n_args = []
-    for arg in args:
-        if arg is None:
-            n_args.append([])
-        else:
-            n_args.append(arg)
-    return chain(*tuple(n_args))
-
-
-def concat(defined_type):
-    '''UDF func to concat arrays
-    '''
-    def concat_(*args):
-        '''Concat arrays and eliminates duplicates
-        '''
-        return sorted(list(set(my_chain(*args))))
-    return func.udf(concat_, ArrayType(defined_type))
-
-
-# def transform_to_undirected(graph):
-#     original_edges = graph.edges.where('src != dst')
-#     concat_string_arrays = concat(StringType())
-#     edges = original_edges.groupBy('num_recibo').agg(
-#         func.expr('collect_list(dst) AS dsts'),
-#         func.expr('collect_list(src) AS srcs')
-#     ).select(
-#         'num_recibo',
-#         concat_string_arrays('dsts', 'srcs').alias('vertices')
-#     )
-
-#     edges = edges.groupBy('vertices').agg(
-#         func.first(edges.num_recibo).alias('num_recibo')
-#     ).select('num_recibo')
-
-#     edges = edges.join(
-#         original_edges, edges.num_recibo == original_edges.num_recibo
-#     ).drop(edges.num_recibo)
-
-#     return GraphFrame(graph.vertices, edges)
+    if float(value) <= 0:
+        return 0
+    return float(value) - 1
 
 
 class Assortativity(object):
@@ -70,27 +31,51 @@ class Assortativity(object):
         print ' - Calculating every node degree'
         graph = self.graph
         edges = graph.edges.where('src != dst')
+        vertices = graph.vertices
 
         out_neighbors_ids = edges.select(edges.src.alias('id'), 'dst').distinct().groupBy(
             'id').agg(func.expr('collect_list(dst) AS out_neighbors'))
 
+        out_neighbors_ids = vertices.join(
+            out_neighbors_ids, out_neighbors_ids.id == vertices.id, 'left_outer'
+        ).select(
+            vertices.id,
+            out_neighbors_ids.out_neighbors.alias('out_neighbors')
+        )
+
         in_neighbors_ids = edges.select(edges.dst.alias('id'), 'src').distinct().groupBy(
             'id').agg(func.expr('collect_list(src) AS in_neighbors'))
+
+        in_neighbors_ids = vertices.join(
+            in_neighbors_ids, in_neighbors_ids.id == vertices.id, 'left_outer'
+        ).select(
+            vertices.id,
+            in_neighbors_ids.in_neighbors.alias('in_neighbors')
+        )
 
         nodes_degree = out_neighbors_ids.join(
             in_neighbors_ids, out_neighbors_ids.id == in_neighbors_ids.id
         ).drop(out_neighbors_ids.id)
 
+        fix_degree = func.udf(lambda value: value if value >= 0 else 0)
         nodes_degree = nodes_degree.select(
             'id',
-            func.size('out_neighbors').alias('out_degree'),
-            func.size('in_neighbors').alias('in_degree')
+            func.size('out_neighbors').alias('pre_out_degree'),
+            func.size('in_neighbors').alias('pre_in_degree')
         )
+        nodes_degree = nodes_degree.withColumn(
+            'out_degree', fix_degree(nodes_degree.pre_out_degree)
+        ).drop('pre_out_degree')
 
-        nodes_degree = graph.vertices.join(
-            nodes_degree, nodes_degree.id == graph.vertices.id, 'left_outer'
+        nodes_degree = nodes_degree.withColumn(
+            'in_degree', fix_degree(nodes_degree.pre_in_degree)
+        ).drop('pre_in_degree')
+
+
+        nodes_degree = vertices.join(
+            nodes_degree, nodes_degree.id == vertices.id, 'left_outer'
         ).select(
-            graph.vertices.id,
+            vertices.id,
             nodes_degree.out_degree,
             nodes_degree.in_degree
         ).fillna({'out_degree': 0, 'in_degree': 0})
@@ -118,32 +103,32 @@ class Assortativity(object):
         n_of_edges = 1 / float(edges_degress.count())
 
         sum1 = edges_degress.map(
-            lambda row: (row['src_in_degree'] + row['dst_in_degree'] - 2) *\
-                        (row['src_out_degree'] + row['dst_out_degree'] - 2)
+            lambda row: (e_d(row['src_in_degree']) + e_d(row['dst_in_degree'])) *\
+                        (e_d(row['src_out_degree']) + e_d(row['dst_out_degree']))
         ).sum()
 
         sum2 = edges_degress.map(
-            lambda row: row['src_in_degree'] + row['dst_in_degree'] - 2
+            lambda row: e_d(row['src_in_degree']) + e_d(row['dst_in_degree'])
         ).sum()
 
         sum3 = edges_degress.map(
-            lambda row: row['src_out_degree'] + row['dst_out_degree'] - 2
+            lambda row: e_d(row['src_out_degree']) + e_d(row['dst_out_degree'])
         ).sum()
 
         numerator = sum1 - (n_of_edges * sum2 * sum3)
 
         sum4 = edges_degress.map(
-            lambda row: (row['src_in_degree'] + row['dst_in_degree'] - 2) ** 2
+            lambda row: (e_d(row['src_in_degree']) + e_d(row['dst_in_degree'])) ** 2
         ).sum()
 
         denominator_part1 = sum4 - (n_of_edges * (sum2 ** 2))
 
         sum5 = edges_degress.map(
-            lambda row: (row['src_out_degree'] + row['dst_out_degree'] - 2) ** 2
+            lambda row: (e_d(row['src_out_degree']) + e_d(row['dst_out_degree'])) ** 2
         ).sum()
 
         denominator_part2 = sum5 - (n_of_edges * (sum3 ** 2))
 
-        denominator = sqrt(denominator_part1 * denominator_part2)
+        denominator = (denominator_part1 * denominator_part2) ** (1/2.0)
 
         return numerator / denominator
