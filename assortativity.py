@@ -30,8 +30,10 @@ class Assortativity(object):
 
         print ' - Calculating every node degree'
         graph = self.graph
-        edges = graph.edges.where('src != dst')
         vertices = graph.vertices
+        ids = vertices.rdd.map(lambda r: r['id']).collect()
+        edges = graph.edges.where('src != dst').select('src', 'dst').distinct()
+        edges = edges.where(edges.src.isin(ids) & edges.dst.isin(ids))
 
         out_neighbors_ids = edges.select(edges.src.alias('id'), 'dst').distinct().groupBy(
             'id').agg(func.expr('collect_list(dst) AS out_neighbors'))
@@ -82,21 +84,23 @@ class Assortativity(object):
 
         print ' - Calculating edges degrees'
 
-        edges = edges.select('src', 'dst').distinct()
-
         edges_degress = edges.join(
             nodes_degree, edges.src == nodes_degree.id
         ).select(
             'src', 'dst',
             nodes_degree.in_degree.alias('src_in_degree'),
             nodes_degree.out_degree.alias('src_out_degree')
-        ).join(
-            nodes_degree, edges.dst == nodes_degree.id
+        )
+
+        edges_degress = edges_degress.join(
+            nodes_degree, edges_degress.dst == nodes_degree.id
         ).select(
             'src', 'dst', 'src_in_degree', 'src_out_degree',
             nodes_degree.in_degree.alias('dst_in_degree'),
             nodes_degree.out_degree.alias('dst_out_degree')
-        ).rdd
+        )
+
+        edges_degress = edges_degress.rdd
 
         print ' - Calculating the assortativity'
 
