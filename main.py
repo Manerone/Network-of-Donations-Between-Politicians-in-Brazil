@@ -33,7 +33,7 @@ def read_candidates_file(context, file_path):
             status=candidate[44], partido=int(candidate[17]),
             nasc=candidate[26], genero=candidate[30]
         )
-    ).toDF().where("cidade = 'CURITIBA'")
+    ).toDF()
 
 def read_donations_file(context, file_path):
     '''Read file with donations to candidates
@@ -59,6 +59,20 @@ def read_donations_file(context, file_path):
     ).toDF()
 
 
+def clean_graph(graph):
+    '''Clean the graph by removing:
+    - Self reference edges.
+    - Multiple edges from the same src to the same dst.
+    - Duplication of ID's in the vertices
+    '''
+    vertices = graph.vertices.select('id').distinct()
+    # ids = vertices.rdd.map(lambda r: r['id']).collect()
+    edges = graph.edges
+    # edges = edges.where('src != dst').select('src', 'dst').distinct()
+    # edges = edges.where(edges.src.isin(ids) & edges.dst.isin(ids))
+    return GraphFrame(vertices, edges)
+
+
 def average_shortest_path(graph):
     '''Calculates the average shortest path of the graph.
     OBS: Only uses 1000 vertices.
@@ -72,11 +86,20 @@ def average_shortest_path(graph):
                   .groupBy().agg(func.avg('value').alias('average')).collect()[0]['average']
 
 
+def print_result(result):
+    '''Prints the result with the word 'RESULT: ' before
+    '''
+    print 'RESULT: ', result
+
+
 def main():
     '''Main function of the script
     '''
     spark_context = SparkContext()
     sql_context = SQLContext(spark_context)
+
+    print '*********************************************************'
+    print '******************** STARTING SCRIPT ********************'
 
     print 'Reading candidates file'
     candidates = read_candidates_file(spark_context, CANDIDATES_PATH)
@@ -85,14 +108,17 @@ def main():
     donations = read_donations_file(spark_context, DONATIONS_PATH)
 
     print 'Build graph'
-    graph = GraphFrame(candidates, donations)
 
-    print Assortativity(graph).calculate()
+    graph = clean_graph(GraphFrame(candidates, donations))
 
-    print LocalClusteringCoefficient(graph).calculate_average()
+    # print_result(Assortativity(graph).calculate())
 
-    print average_shortest_path(graph)
+    print_result(LocalClusteringCoefficient(graph).calculate_average())
 
+    # print_result(average_shortest_path(graph))
+
+    print '******************** FINISHING SCRIPT *******************'
+    print '*********************************************************'
 
 if __name__ == '__main__':
     main()
