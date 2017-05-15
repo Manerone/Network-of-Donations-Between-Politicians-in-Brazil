@@ -33,7 +33,7 @@ def clustering_coef(n_of_neighbors, n_of_edges_in_neighborhood):
     '''
     if n_of_neighbors < 2:
         return 0
-    return (n_of_edges_in_neighborhood * 2) / float(n_of_neighbors * (n_of_neighbors - 1))
+    return (n_of_edges_in_neighborhood) / float(n_of_neighbors * (n_of_neighbors - 1))
 
 
 class LocalClusteringCoefficient(object):
@@ -103,9 +103,11 @@ class LocalClusteringCoefficient(object):
             'id', func.size('neighbors').alias('n_of_neighbors'))
 
         print ' - Calculating clustering coefficient'
-        return edges_in_neighborhood.join(
+        pre_calc = edges_in_neighborhood.join(
             n_of_neighbors, edges_in_neighborhood.id == n_of_neighbors.id
-        ).rdd.map(
+        )
+        pre_calc.cache() # NEED THIS BECAUSE OF BUG ON PYSPARK
+        return pre_calc.where(pre_calc.n_of_neighbors > 1).rdd.map(
             lambda row: Row(
                 id=row['id'],
                 clustering_coefficient=clustering_coef(
