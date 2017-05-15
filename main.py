@@ -60,16 +60,24 @@ def read_donations_file(context, file_path):
 
 
 def clean_graph(graph):
-    '''Clean the graph by removing:
-    - Self reference edges.
-    - Multiple edges from the same src to the same dst.
-    - Duplication of ID's in the vertices
+    '''Clean the graph by:
+    - Removing self reference edges.
+    - Removing multiple edges from the same src to the same dst.
+    - Removing duplication of ID's in the vertices.
+    - Adding srcs and dsts not in vertices to vertices.
+
     '''
     vertices = graph.vertices.select('id').distinct()
-    # ids = vertices.rdd.map(lambda r: r['id']).collect()
-    edges = graph.edges
-    # edges = edges.where('src != dst').select('src', 'dst').distinct()
-    # edges = edges.where(edges.src.isin(ids) & edges.dst.isin(ids))
+    edges = graph.edges.where('src != dst').select('src', 'dst').distinct()
+    ids = vertices.rdd.map(lambda r: r['id']).collect()
+
+    srcs_not_in = edges.where((edges.src.isin(ids) == False) & (edges.dst.isin(ids)))
+    srcs_not_in = srcs_not_in.select(srcs_not_in.src.alias('id')).distinct()
+    dsts_not_in = edges.where((edges.dst.isin(ids) == False) & (edges.src.isin(ids)))
+    dsts_not_in = dsts_not_in.select(dsts_not_in.dst.alias('id')).distinct()
+
+    vertices = vertices.unionAll(srcs_not_in)
+    vertices = vertices.unionAll(dsts_not_in)
     return GraphFrame(vertices, edges)
 
 
@@ -95,7 +103,7 @@ def print_result(result):
 def main():
     '''Main function of the script
     '''
-    spark_context = SparkContext()
+    spark_context = SparkContext("local", "Donations Network")
     sql_context = SQLContext(spark_context)
 
     print '*********************************************************'
@@ -111,11 +119,11 @@ def main():
 
     graph = clean_graph(GraphFrame(candidates, donations))
 
-    # print_result(Assortativity(graph).calculate())
+    print_result(Assortativity(graph).calculate())
 
     print_result(LocalClusteringCoefficient(graph).calculate_average())
 
-    # print_result(average_shortest_path(graph))
+    print_result(average_shortest_path(graph))
 
     print '******************** FINISHING SCRIPT *******************'
     print '*********************************************************'
