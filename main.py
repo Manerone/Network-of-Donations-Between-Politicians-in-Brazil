@@ -9,6 +9,7 @@ from pyspark.sql.types import StringType, ArrayType
 from graphframes import *
 from local_clustering_coefficient import LocalClusteringCoefficient
 from assortativity import Assortativity
+from graphviz import Digraph
 
 CURRENT_PATH = os.path.dirname(os.path.realpath(__file__))
 CANDIDATES_PATH = CURRENT_PATH + '/databases/consulta_cand/consulta_cand_2016_PR.txt'
@@ -72,7 +73,9 @@ def clean_graph(graph):
     '''
     print 'Graph cleaning'
     print ' - Removing ID duplication'
-    vertices = graph.vertices.select('id').distinct()
+    vertices = graph.vertices.groupBy('id').agg(
+        func.first('nome').alias('nome')
+    )
     print ' - Removing multiple connections'
     edges = graph.edges.where('src != dst').groupBy('src', 'dst').agg(
         func.sum('valor').alias('valor')
@@ -85,13 +88,35 @@ def clean_graph(graph):
     dsts_not_in = edges.where((edges.dst.isin(ids) == False) & (edges.src.isin(ids)))
     dsts_not_in = dsts_not_in.select(dsts_not_in.dst.alias('id')).distinct()
 
-    vertices = vertices.unionAll(srcs_not_in)
-    vertices = vertices.unionAll(dsts_not_in)
+    vertices = vertices.unionAll(srcs_not_in.withColumn('nome', func.lit(None).cast(StringType())))
+    vertices = vertices.unionAll(dsts_not_in.withColumn('nome', func.lit(None).cast(StringType())))
 
     print ' - Removing edges where both dst and src are not in the vertices'
     ids = vertices.rdd.map(lambda r: r['id']).collect()
     edges = edges.where((edges.src.isin(ids)) & (edges.dst.isin(ids)))
     return GraphFrame(vertices, edges)
+
+
+def write_graph_to_file(graph, file_name):
+    '''Writes the graph to a .gv file
+    '''
+    dot = Digraph(name=file_name)
+
+    srcs = graph.edges.rdd.map(lambda r: r['src']).collect()
+    dsts = graph.edges.rdd.map(lambda r: r['dst']).collect()
+    values = graph.edges.rdd.map(lambda r: str(r['valor'])).collect()
+    vertices = graph.vertices
+    vertices = vertices.where(
+        vertices.id.isin(srcs) | vertices.id.isin(dsts)
+    ).rdd.map(lambda r: {'id': r['id'], 'nome': r['nome']}).collect()
+
+    for vertice in vertices:
+        dot.node(vertice['id'], label=vertice['nome'])
+
+    for src, dst, value in zip(srcs, dsts, values):
+        dot.edge(src, dst, label=value)
+
+    dot.save(directory='graphs')
 
 
 def average_shortest_path(graph):
@@ -230,25 +255,7 @@ def print_result(result):
     print 'RESULT: ', result
 
 
-def main():
-    '''Main function of the script
-    '''
-    spark_context = SparkContext("local", "Donations Network")
-    sql_context = SQLContext(spark_context)
-
-    print '*********************************************************'
-    print '******************** STARTING SCRIPT ********************'
-
-    print 'Reading candidates file'
-    candidates = read_candidates_file(spark_context, CANDIDATES_PATH)
-
-    print 'Reading donations file'
-    donations = read_donations_file(spark_context, DONATIONS_PATH)
-
-    print 'Building graph'
-
-    graph = clean_graph(GraphFrame(candidates, donations))
-
+def calculate_architecture(graph):
     number_of_vertices = n_of_vertices(graph)
     print 'Number of vertices: ', number_of_vertices
 
@@ -273,14 +280,43 @@ def main():
     scc = largest_scc(graph)
     print_result(scc)
 
-    print '@@@@@@@@@@@@@@@@@@@@ FINAL RESULT @@@@@@@@@@@@@@@@@@@@@@@'
+    print '@@@@@@@@@@@@@@@@@@@@ ARCHITECTURE RESULT @@@@@@@@@@@@@@@@'
     schema = ["N of nodes", "N of edges", "Avg. Degree", "Clustering Coef.",
               "Avg. Path Length", "Assorativity Coef.", "Largest SCC", "Largest WCC"]
-    data = (number_of_vertices, number_of_edges, avg_degree, lcc,\
+    data = (number_of_vertices, number_of_edges, avg_degree, lcc,
             avg_shortest_path, assortativity, scc, wcc)
     result = sql_context.createDataFrame([data], schema)
     result.show()
     print '@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@'
+
+
+def community_info(graph):
+    graph.labelPropagation(maxIter=10)
+
+
+def main():
+    '''Main function of the script
+    '''
+    spark_context = SparkContext("local", "Donations Network")
+    sql_context = SQLContext(spark_context)
+
+    print '*********************************************************'
+    print '******************** STARTING SCRIPT ********************'
+
+    print 'Reading candidates file'
+    candidates = read_candidates_file(spark_context, CANDIDATES_PATH)
+
+    print 'Reading donations file'
+    donations = read_donations_file(spark_context, DONATIONS_PATH)
+
+    print 'Building graph'
+
+    graph = clean_graph(GraphFrame(candidates, donations))
+
+    # calculate_architecture(graph)
+
+    write_graph_to_file(graph, 'curitiba_full')
+
     print '******************** FINISHING SCRIPT *******************'
     print '*********************************************************'
 
