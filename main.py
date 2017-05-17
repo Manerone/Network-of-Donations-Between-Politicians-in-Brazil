@@ -35,7 +35,7 @@ def read_candidates_file(context, file_path):
             status=candidate[44], partido=int(candidate[17]),
             nasc=candidate[26], genero=candidate[30]
         )
-    ).toDF()
+    ).toDF().where("cidade= 'CURITIBA'")
 
 def read_donations_file(context, file_path):
     '''Read file with donations to candidates
@@ -74,7 +74,9 @@ def clean_graph(graph):
     print ' - Removing ID duplication'
     vertices = graph.vertices.select('id').distinct()
     print ' - Removing multiple connections'
-    edges = graph.edges.where('src != dst').select('src', 'dst').distinct()
+    edges = graph.edges.where('src != dst').groupBy('src', 'dst').agg(
+        func.sum('valor').alias('valor')
+    )
 
     print ' - Adding srcs and dsts that are not in vertices into vertices'
     ids = vertices.rdd.map(lambda r: r['id']).collect()
@@ -94,10 +96,10 @@ def clean_graph(graph):
 
 def average_shortest_path(graph):
     '''Calculates the average shortest path of the graph.
-    OBS: Only uses 1000 vertices.
+    OBS: Only uses 100 vertices.
     '''
     print 'Calculating average shortest path'
-    s_size = 1000 / float(graph.vertices.count())
+    s_size = 100 / float(graph.vertices.count())
     vertices_sample = graph.vertices.sample(False, s_size).rdd.map(
         lambda r: r['id']).collect()
     results = graph.shortestPaths(landmarks=vertices_sample)
@@ -116,7 +118,7 @@ def biggest_connected_component(graph):
 def biggest_strong_connected_component(graph):
     '''Return the biggest strong connected component
     '''
-    return graph.connectedComponents(maxIter=10).groupBy('component').agg(
+    return graph.stronglyConnectedComponents(maxIter=10).groupBy('component').agg(
         func.countDistinct('id').alias('size')
     ).sort(func.desc('size')).rdd.take(1)[0]
 
