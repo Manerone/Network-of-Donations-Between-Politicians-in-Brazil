@@ -2,6 +2,7 @@
 '''
 import os
 from itertools import chain
+from collections import Counter
 from pyspark import SparkContext, SQLContext
 from pyspark.sql import Row
 import pyspark.sql.functions as func
@@ -33,7 +34,7 @@ def read_candidates_file(context, file_path):
             cod_cidade=int(candidate[6]), cargo=candidate[9],
             nome=candidate[10], num_cand=int(candidate[12]),
             cidade=candidate[7], cod_status=int(candidate[43]),
-            status=candidate[44], partido=int(candidate[17]),
+            status=candidate[44], partido=candidate[18],
             nasc=candidate[26], genero=candidate[30]
         )
     ).toDF().where("cidade= 'CURITIBA'")
@@ -74,7 +75,8 @@ def clean_graph(graph):
     print 'Graph cleaning'
     print ' - Removing ID duplication'
     vertices = graph.vertices.groupBy('id').agg(
-        func.first('nome').alias('nome')
+        func.first('nome').alias('nome'),
+        func.first('partido').alias('partido')
     )
     print ' - Removing multiple connections'
     edges = graph.edges.where('src != dst').groupBy('src', 'dst').agg(
@@ -88,8 +90,14 @@ def clean_graph(graph):
     dsts_not_in = edges.where((edges.dst.isin(ids) == False) & (edges.src.isin(ids)))
     dsts_not_in = dsts_not_in.select(dsts_not_in.dst.alias('id')).distinct()
 
-    vertices = vertices.unionAll(srcs_not_in.withColumn('nome', func.lit(None).cast(StringType())))
-    vertices = vertices.unionAll(dsts_not_in.withColumn('nome', func.lit(None).cast(StringType())))
+    srcs_not_in = srcs_not_in.withColumn('nome', func.lit(None).cast(StringType()))
+    dsts_not_in = dsts_not_in.withColumn('nome', func.lit(None).cast(StringType()))
+
+    srcs_not_in = srcs_not_in.withColumn('partido', func.lit(None).cast(StringType()))
+    dsts_not_in = dsts_not_in.withColumn('partido', func.lit(None).cast(StringType()))
+
+    vertices = vertices.unionAll(srcs_not_in)
+    vertices = vertices.unionAll(dsts_not_in)
 
     print ' - Removing edges where both dst and src are not in the vertices'
     ids = vertices.rdd.map(lambda r: r['id']).collect()
@@ -128,7 +136,9 @@ def average_shortest_path(graph):
     vertices_sample = graph.vertices.sample(False, s_size).rdd.map(
         lambda r: r['id']).collect()
     results = graph.shortestPaths(landmarks=vertices_sample)
-    return results.select('id', func.explode('distances').alias('key', 'value'))\
+    results = results.select('id', func.explode(
+        'distances').alias('key', 'value'))
+    return results.select(results.value > 0)\
                   .groupBy().agg(func.avg('value').alias('average')).collect()[0]['average']
 
 
@@ -256,6 +266,7 @@ def print_result(result):
 
 
 def calculate_architecture(graph):
+    print '@@ ARCHITECTURE @@'
     number_of_vertices = n_of_vertices(graph)
     print 'Number of vertices: ', number_of_vertices
 
@@ -290,8 +301,30 @@ def calculate_architecture(graph):
     print '@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@'
 
 
+def count_political(list):
+    first = Counter(list).most_common(1)[0]
+    key = first[0]
+    value = first[1]
+    return Row(partido=key, ocorrencias=value, tamanho=len(list))
+
+
 def community_info(graph):
-    graph.labelPropagation(maxIter=10)
+    print '@@ COMMUNITY @@'
+    communities = graph.labelPropagation(maxIter=20)
+
+    grouped = communities.groupBy('label').agg(
+        func.expr('collect_list(partido) as members')
+    )
+
+    grouped = grouped.where(func.size(grouped.members) > 1)
+
+    grouped.show(grouped.count())
+
+    grouped = grouped.rdd.map(
+        lambda r: count_political(r['members'])
+    ).toDF()
+
+    grouped.show(grouped.count())
 
 
 def main():
@@ -315,7 +348,9 @@ def main():
 
     # calculate_architecture(graph)
 
-    write_graph_to_file(graph, 'curitiba_full')
+    community_info(graph)
+
+    # write_graph_to_file(graph, 'curitiba_full')
 
     print '******************** FINISHING SCRIPT *******************'
     print '*********************************************************'
