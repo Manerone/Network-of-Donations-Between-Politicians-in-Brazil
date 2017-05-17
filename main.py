@@ -132,13 +132,13 @@ def average_shortest_path(graph):
     OBS: Only uses 100 vertices.
     '''
     print 'Calculating average shortest path'
-    s_size = 100 / float(graph.vertices.count())
+    s_size = 400 / float(graph.vertices.count())
     vertices_sample = graph.vertices.sample(False, s_size).rdd.map(
         lambda r: r['id']).collect()
     results = graph.shortestPaths(landmarks=vertices_sample)
     results = results.select('id', func.explode(
         'distances').alias('key', 'value'))
-    return results.select(results.value > 0)\
+    return results.where(results.value > 0)\
                   .groupBy().agg(func.avg('value').alias('average')).collect()[0]['average']
 
 
@@ -318,13 +318,13 @@ def community_info(graph):
 
     grouped = grouped.where(func.size(grouped.members) > 1)
 
-    grouped.show(grouped.count())
+    grouped.show(grouped.count(), False)
 
     grouped = grouped.rdd.map(
         lambda r: count_political(r['members'])
     ).toDF()
 
-    grouped.show(grouped.count())
+    grouped.show(grouped.count(), False)
 
 
 def main():
@@ -346,7 +346,7 @@ def main():
 
     graph = clean_graph(GraphFrame(candidates, donations))
 
-    # calculate_architecture(graph)
+    calculate_architecture(graph)
 
     community_info(graph)
 
